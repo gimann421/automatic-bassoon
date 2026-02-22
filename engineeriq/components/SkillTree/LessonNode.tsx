@@ -11,14 +11,28 @@ import { LessonStatus } from '../../store/useAppStore';
 
 const NODE_SIZE = 64;
 
+export type NodeType = 'lesson' | 'practice' | 'quiz' | 'review';
+
 interface LessonNodeProps {
   status: LessonStatus;
   accentColor: string;
   glowColor: string;
   lessonNumber: number;
+  nodeType?: NodeType;
   reviewDue?: boolean;
   onPress: () => void;
   onLockedPress: () => void;
+}
+
+function nodeIcon(nodeType: NodeType, status: LessonStatus, lessonNumber: number): string {
+  if (status === 'locked') return '🔒';
+  if (status === 'completed') return '✓';
+  switch (nodeType) {
+    case 'quiz': return '🏆';
+    case 'practice': return '✏️';
+    case 'review': return '🔁';
+    default: return String(lessonNumber);
+  }
 }
 
 export default function LessonNode({
@@ -26,6 +40,7 @@ export default function LessonNode({
   accentColor,
   glowColor,
   lessonNumber,
+  nodeType = 'lesson',
   reviewDue = false,
   onPress,
   onLockedPress,
@@ -50,27 +65,40 @@ export default function LessonNode({
   const isCompleted = status === 'completed';
   const isAvailable = status === 'available';
 
+  const quizAvailableColor = '#F59E0B';
+  const resolvedAccentColor = nodeType === 'quiz' && !isLocked ? quizAvailableColor : accentColor;
+
   const nodeBackground = isLocked
     ? Colors.nodeLocked
     : isCompleted
-    ? Colors.nodeCompleted
-    : accentColor;
+    ? nodeType === 'quiz' ? '#D97706' : Colors.nodeCompleted
+    : resolvedAccentColor;
 
   const nodeBorder = isLocked
     ? Colors.nodeLockedBorder
     : isCompleted
-    ? Colors.nodeCompletedBorder
-    : accentColor;
+    ? nodeType === 'quiz' ? '#B45309' : Colors.nodeCompletedBorder
+    : resolvedAccentColor;
+
+  const shadowColor =
+    nodeType === 'quiz'
+      ? quizAvailableColor
+      : isCompleted
+      ? Colors.nodeCompleted
+      : accentColor;
 
   const glowStyle = !isLocked
     ? {
-        shadowColor: isCompleted ? Colors.nodeCompleted : accentColor,
+        shadowColor,
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: isAvailable ? 0.7 : 0.4,
         shadowRadius: isAvailable ? 14 : 8,
         elevation: isAvailable ? 10 : 6,
       }
     : {};
+
+  const icon = nodeIcon(nodeType, status, lessonNumber);
+  const showNumberText = !isCompleted && !isLocked && nodeType === 'lesson';
 
   return (
     <View style={styles.wrapper}>
@@ -80,24 +108,19 @@ export default function LessonNode({
           activeOpacity={0.85}
           style={[
             styles.node,
-            {
-              backgroundColor: nodeBackground,
-              borderColor: nodeBorder,
-            },
+            nodeType === 'quiz' && styles.quizNode,
+            { backgroundColor: nodeBackground, borderColor: nodeBorder },
             glowStyle,
           ]}
         >
-          {isCompleted ? (
-            <Text style={styles.checkmark}>✓</Text>
-          ) : isLocked ? (
-            <Text style={styles.icon}>🔒</Text>
-          ) : (
+          {showNumberText ? (
             <Text style={styles.number}>{lessonNumber}</Text>
+          ) : (
+            <Text style={isCompleted ? styles.checkmark : styles.icon}>{icon}</Text>
           )}
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Review due indicator */}
       {reviewDue && !isLocked && (
         <View style={styles.reviewBadge}>
           <Text style={styles.reviewIcon}>🔁</Text>
@@ -119,6 +142,11 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  quizNode: {
+    width: NODE_SIZE + 8,
+    height: NODE_SIZE + 8,
+    borderWidth: 4,
   },
   checkmark: {
     color: Colors.white,

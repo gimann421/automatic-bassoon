@@ -10,46 +10,69 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { getLessonById, getUnitById } from '../../data/curriculum';
+import { getUnitById } from '../../data/curriculum';
 import useAppStore from '../../store/useAppStore';
 import ProgressBar from '../../components/Lesson/ProgressBar';
 import HeartsDisplay from '../../components/Lesson/HeartsDisplay';
 import MultipleChoice from '../../components/Lesson/MultipleChoice';
 import TrueFalse from '../../components/Lesson/TrueFalse';
-import FillInBlank from '../../components/Lesson/FillInBlank';
 import FeedbackBanner from '../../components/Lesson/FeedbackBanner';
 import { Colors, FontSize, Spacing, Radius } from '../../constants/theme';
 
-export default function LessonScreen() {
-  const { id, review } = useLocalSearchParams<{ id: string; review?: string }>();
+const QUIZ_GOLD = '#F59E0B';
+
+export default function UnitQuizScreen() {
+  const { unitId } = useLocalSearchParams<{ unitId: string }>();
   const router = useRouter();
-  const { hearts, loseHeart, resetHearts, completeLesson } = useAppStore();
+  const { hearts, loseHeart, resetHearts, completeUnitQuiz, canRetakeQuizToday, unitQuizProgress } =
+    useAppStore();
 
-  const lesson = getLessonById(id);
-  const unit = lesson ? getUnitById(lesson.unitId) : undefined;
-  const accentColor = unit?.accentColor ?? Colors.unit1;
-
-  // For review mode, use only first 3 questions
-  const isReview = review === 'true';
-  const questions = isReview ? (lesson?.questions.slice(0, 3) ?? []) : (lesson?.questions ?? []);
+  const unit = getUnitById(unitId);
+  const accentColor = QUIZ_GOLD;
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [feedbackVisible, setFeedbackVisible] = useState(false);
   const [lastCorrect, setLastCorrect] = useState(false);
   const [wrongCount, setWrongCount] = useState(0);
-  const [answerKey, setAnswerKey] = useState(0); // force re-mount question components
-  const startTime = useRef(Date.now());
+  const [correctCount, setCorrectCount] = useState(0);
+  const [answerKey, setAnswerKey] = useState(0);
 
-  if (!lesson || !unit) {
+  if (!unit) {
     return (
       <SafeAreaView style={styles.safe}>
-        <Text style={styles.errorText}>Lesson not found</Text>
+        <Text style={styles.errorText}>Quiz not found</Text>
       </SafeAreaView>
     );
   }
 
-  const currentQuestion = questions[currentIndex];
+  const quizProgress = unitQuizProgress[unitId];
+  const alreadyPassed = quizProgress?.passed === true;
+  const canRetake = canRetakeQuizToday(unitId);
+
+  // If already passed and can't retake today, show a locked message
+  if (alreadyPassed && !canRetake) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.lockedContent}>
+          <Text style={styles.lockedEmoji}>🏆</Text>
+          <Text style={styles.lockedTitle}>Already Completed!</Text>
+          <Text style={styles.lockedBody}>
+            You've already passed this unit quiz today. Come back tomorrow to earn more XP.
+          </Text>
+          <TouchableOpacity
+            style={[styles.ctaButton, { backgroundColor: accentColor }]}
+            onPress={() => router.replace('/(tabs)')}
+          >
+            <Text style={styles.ctaText}>Back to Path</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const questions = unit.quiz.questions;
   const totalQuestions = questions.length;
+  const currentQuestion = questions[currentIndex];
 
   const handleAnswer = useCallback(
     async (correct: boolean) => {
@@ -58,19 +81,14 @@ export default function LessonScreen() {
 
       if (correct) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setCorrectCount((c) => c + 1);
       } else {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         loseHeart();
         setWrongCount((c) => c + 1);
-
-        // Check if out of hearts
-        const newHearts = hearts - 1;
-        if (newHearts <= 0) {
-          // Will be handled in handleContinue after banner shows
-        }
       }
     },
-    [hearts, loseHeart]
+    [loseHeart]
   );
 
   const handleContinue = useCallback(() => {
@@ -78,25 +96,28 @@ export default function LessonScreen() {
 
     const currentHearts = useAppStore.getState().hearts;
 
-    // Out of hearts — restart lesson
+    // Out of hearts — quiz failed
     if (!lastCorrect && currentHearts <= 0) {
       Alert.alert(
-        '💔 Out of Hearts',
-        "You've run out of hearts. Let's try again!",
+        '💔 Quiz Failed',
+        "You've run out of hearts. Keep practicing and try again!",
         [
           {
-            text: 'Restart',
+            text: 'Try Again',
             onPress: () => {
               resetHearts();
               setCurrentIndex(0);
+              setCorrectCount(0);
               setWrongCount(0);
               setAnswerKey((k) => k + 1);
-              startTime.current = Date.now();
             },
           },
           {
             text: 'Exit',
-            onPress: () => router.back(),
+            onPress: () => {
+              resetHearts();
+              router.replace('/(tabs)');
+            },
             style: 'cancel',
           },
         ]
@@ -106,28 +127,46 @@ export default function LessonScreen() {
 
     const nextIndex = currentIndex + 1;
     if (nextIndex >= totalQuestions) {
-      // Lesson complete
-      const elapsed = Math.round((Date.now() - startTime.current) / 1000);
-      const perfect = wrongCount === 0;
-      const xpEarned = perfect ? 30 : 20;
+      // Quiz complete
+      const finalCorrect = correctCount + (lastCorrect ? 1 : 0);
+      completeUnitQuiz(unitId, finalCorrect, totalQuestions);
 
-      if (!isReview) {
-        completeLesson(lesson.id, perfect);
+      const passed = finalCorrect / totalQuestions >= 0.5;
+      if (passed) {
+        router.replace({
+          pathname: '/quiz/quiz-complete',
+          params: {
+            unitId,
+            score: String(finalCorrect),
+            outOf: String(totalQuestions),
+          },
+        });
       } else {
-        resetHearts();
+        Alert.alert(
+          'Quiz Failed',
+          `You scored ${finalCorrect}/${totalQuestions}. You need at least ${Math.ceil(totalQuestions * 0.5)} correct to pass.`,
+          [
+            {
+              text: 'Try Again',
+              onPress: () => {
+                resetHearts();
+                setCurrentIndex(0);
+                setCorrectCount(0);
+                setWrongCount(0);
+                setAnswerKey((k) => k + 1);
+              },
+            },
+            {
+              text: 'Exit',
+              onPress: () => {
+                resetHearts();
+                router.replace('/(tabs)');
+              },
+              style: 'cancel',
+            },
+          ]
+        );
       }
-
-      router.replace({
-        pathname: '/lesson-complete',
-        params: {
-          lessonId: lesson.id,
-          xpEarned: String(xpEarned),
-          perfect: String(perfect),
-          totalQuestions: String(totalQuestions),
-          wrongCount: String(wrongCount),
-          elapsed: String(elapsed),
-        },
-      });
     } else {
       setCurrentIndex(nextIndex);
       setAnswerKey((k) => k + 1);
@@ -136,16 +175,15 @@ export default function LessonScreen() {
     currentIndex,
     totalQuestions,
     lastCorrect,
-    wrongCount,
-    lesson,
-    isReview,
-    completeLesson,
+    correctCount,
+    unitId,
+    completeUnitQuiz,
     resetHearts,
     router,
   ]);
 
   const handleExit = () => {
-    Alert.alert('Exit Lesson?', 'Your progress on this lesson will not be saved.', [
+    Alert.alert('Exit Quiz?', 'Your quiz progress will not be saved.', [
       { text: 'Keep Going', style: 'cancel' },
       {
         text: 'Exit',
@@ -179,18 +217,21 @@ export default function LessonScreen() {
         <HeartsDisplay hearts={useAppStore.getState().hearts} />
       </View>
 
-      {/* Question label */}
+      {/* Quiz label */}
       <View style={styles.questionMeta}>
-        <Text style={styles.questionCounter}>
-          {isReview ? '🔁 Review · ' : ''}
-          {currentIndex + 1} / {totalQuestions}
+        <View style={styles.quizBadgeRow}>
+          <Text style={styles.quizBadgeEmoji}>🏆</Text>
+          <Text style={styles.quizBadgeText}>Unit Quiz</Text>
+        </View>
+        <Text style={styles.unitTitle} numberOfLines={1}>
+          {unit.title}
         </Text>
-        <Text style={styles.lessonTitle} numberOfLines={1}>
-          {lesson.title}
+        <Text style={styles.questionCounter}>
+          Question {currentIndex + 1} of {totalQuestions}
         </Text>
       </View>
 
-      {/* Question content */}
+      {/* Question content — quiz only uses MC and T/F */}
       <View style={styles.questionArea} key={answerKey}>
         {currentQuestion.type === 'multiple-choice' && (
           <MultipleChoice
@@ -206,13 +247,6 @@ export default function LessonScreen() {
             disabled={feedbackVisible}
           />
         )}
-        {currentQuestion.type === 'fill-blank' && (
-          <FillInBlank
-            question={currentQuestion}
-            onAnswer={(correct) => handleAnswer(correct)}
-            disabled={feedbackVisible}
-          />
-        )}
       </View>
 
       {/* Feedback banner */}
@@ -221,9 +255,7 @@ export default function LessonScreen() {
         correct={lastCorrect}
         feedback={currentQuestion.feedback}
         onContinue={handleContinue}
-        continueLabel={
-          currentIndex + 1 >= totalQuestions ? 'Finish' : 'Continue'
-        }
+        continueLabel={currentIndex + 1 >= totalQuestions ? 'Finish' : 'Continue'}
       />
     </SafeAreaView>
   );
@@ -260,22 +292,69 @@ const styles = StyleSheet.create({
   questionMeta: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.md,
-    gap: 2,
+    gap: 4,
+  },
+  quizBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  quizBadgeEmoji: {
+    fontSize: FontSize.sm,
+  },
+  quizBadgeText: {
+    fontSize: FontSize.sm,
+    color: QUIZ_GOLD,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  unitTitle: {
+    fontSize: FontSize.md,
+    color: Colors.textPrimary,
+    fontWeight: '700',
   },
   questionCounter: {
     fontSize: FontSize.sm,
     color: Colors.textMuted,
     fontWeight: '600',
   },
-  lessonTitle: {
-    fontSize: FontSize.base,
-    color: Colors.textSecondary,
-    fontWeight: '700',
-  },
   questionArea: {
     flex: 1,
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.lg,
+  },
+  lockedContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+    gap: Spacing.xl,
+  },
+  lockedEmoji: {
+    fontSize: 64,
+  },
+  lockedTitle: {
+    fontSize: FontSize.xxl,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  lockedBody: {
+    fontSize: FontSize.base,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  ctaButton: {
+    width: '100%',
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.lg,
+    alignItems: 'center',
+  },
+  ctaText: {
+    color: Colors.white,
+    fontSize: FontSize.md,
+    fontWeight: '800',
   },
   errorText: {
     color: Colors.textSecondary,

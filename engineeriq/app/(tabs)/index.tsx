@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import useAppStore from '../../store/useAppStore';
-import { Lesson } from '../../data/curriculum';
+import { Lesson, Unit, UNITS } from '../../data/curriculum';
 import SkillTreeComponent from '../../components/SkillTree/SkillTree';
 import LessonDetailSheet from '../../components/LessonDetailSheet';
 import XPBadge from '../../components/common/XPBadge';
@@ -19,8 +19,16 @@ import { Colors, FontSize, Spacing, Radius } from '../../constants/theme';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { xp, streak, lessonProgress, getDueReviews, loadFromStorage, checkAndUpdateStreak } =
-    useAppStore();
+  const {
+    xp,
+    streak,
+    lessonProgress,
+    unitQuizProgress,
+    getDueReviews,
+    isUnitQuizUnlocked,
+    loadFromStorage,
+    checkAndUpdateStreak,
+  } = useAppStore();
 
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [selectedAccent, setSelectedAccent] = useState<string>(Colors.unit1);
@@ -34,6 +42,14 @@ export default function HomeScreen() {
 
   const dueReviews = getDueReviews();
 
+  // Build quiz unlock/pass maps for skill tree
+  const quizUnlocked: Record<string, boolean> = {};
+  const quizPassed: Record<string, boolean> = {};
+  UNITS.forEach((unit) => {
+    quizUnlocked[unit.id] = isUnitQuizUnlocked(unit.id);
+    quizPassed[unit.id] = unitQuizProgress[unit.id]?.passed ?? false;
+  });
+
   const handleLessonPress = useCallback((lesson: Lesson, accentColor: string) => {
     setSelectedLesson(lesson);
     setSelectedAccent(accentColor);
@@ -44,17 +60,27 @@ export default function HomeScreen() {
     setSheetVisible(false);
   }, []);
 
-  const handleStartLesson = useCallback((lessonId: string) => {
+  const handleStartContent = useCallback((lessonId: string) => {
     setSheetVisible(false);
     setTimeout(() => {
-      router.push(`/lesson/${lessonId}`);
+      router.push(`/lesson/${lessonId}/content`);
     }, 300);
   }, [router]);
 
+  const handleRedoPractice = useCallback((lessonId: string) => {
+    setSheetVisible(false);
+    setTimeout(() => {
+      router.push(`/lesson/${lessonId}/practice`);
+    }, 300);
+  }, [router]);
+
+  const handleQuizPress = useCallback((unit: Unit) => {
+    router.push(`/quiz/${unit.id}`);
+  }, [router]);
+
   const handleReviewPress = () => {
-    // Navigate to first due review
     if (dueReviews.length > 0) {
-      router.push(`/lesson/${dueReviews[0]}?review=true`);
+      router.push(`/lesson/${dueReviews[0]}/practice?review=true`);
     }
   };
 
@@ -101,7 +127,10 @@ export default function HomeScreen() {
         <SkillTreeComponent
           lessonProgress={lessonProgress}
           dueReviews={dueReviews}
+          quizUnlocked={quizUnlocked}
+          quizPassed={quizPassed}
           onLessonPress={handleLessonPress}
+          onQuizPress={handleQuizPress}
         />
       </ScrollView>
 
@@ -112,7 +141,8 @@ export default function HomeScreen() {
         accentColor={selectedAccent}
         visible={sheetVisible}
         onClose={handleCloseSheet}
-        onStart={handleStartLesson}
+        onStartContent={handleStartContent}
+        onRedoPractice={handleRedoPractice}
       />
     </SafeAreaView>
   );

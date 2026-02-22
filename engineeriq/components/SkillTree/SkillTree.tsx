@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import { Colors, Spacing } from '../../constants/theme';
-import { UNITS, Lesson } from '../../data/curriculum';
+import { UNITS, Lesson, Unit } from '../../data/curriculum';
 import { LessonStatus } from '../../store/useAppStore';
 import UnitBanner from './UnitBanner';
 import LessonNode from './LessonNode';
@@ -9,10 +9,12 @@ import LessonNode from './LessonNode';
 interface SkillTreeProps {
   lessonProgress: Record<string, LessonStatus>;
   dueReviews: string[];
+  quizUnlocked: Record<string, boolean>;
+  quizPassed: Record<string, boolean>;
   onLessonPress: (lesson: Lesson, unitAccentColor: string) => void;
+  onQuizPress: (unit: Unit) => void;
 }
 
-// Alternating left/center/right positions for nodes to create a path effect
 const NODE_POSITIONS: Array<'left' | 'center' | 'right'> = [
   'center',
   'right',
@@ -25,7 +27,10 @@ const NODE_POSITIONS: Array<'left' | 'center' | 'right'> = [
 export default function SkillTree({
   lessonProgress,
   dueReviews,
+  quizUnlocked,
+  quizPassed,
   onLessonPress,
+  onQuizPress,
 }: SkillTreeProps) {
   return (
     <View style={styles.container}>
@@ -33,6 +38,15 @@ export default function SkillTree({
         const isUnitLocked = unit.lessons.every(
           (l) => lessonProgress[l.id] === 'locked'
         );
+        const isQuizUnlocked = quizUnlocked[unit.id] ?? false;
+        const isQuizPassed = quizPassed[unit.id] ?? false;
+        const quizStatus: LessonStatus = isQuizPassed
+          ? 'completed'
+          : isQuizUnlocked
+          ? 'available'
+          : 'locked';
+
+        const allNodes = [...unit.lessons.map((l, i) => ({ type: 'lesson' as const, lesson: l, index: i }))];
 
         return (
           <View key={unit.id} style={styles.unit}>
@@ -53,14 +67,14 @@ export default function SkillTree({
               const position = NODE_POSITIONS[lessonIndex % NODE_POSITIONS.length];
               const isDue = dueReviews.includes(lesson.id);
 
-              const hasConnector = lessonIndex < unit.lessons.length - 1;
+              // Has connector to next node (lesson or quiz)
+              const hasConnector = lessonIndex < unit.lessons.length - 1 || true; // always has connector to quiz
 
               return (
                 <View
                   key={lesson.id}
-                  style={[styles.nodeRow, hasConnector && styles.nodeRowWithConnector]}
+                  style={[styles.nodeRow, styles.nodeRowWithConnector]}
                 >
-                  {/* Spacer on left */}
                   <View style={[styles.nodeSpacer, position === 'right' && styles.nodeSpacerFull]} />
 
                   <LessonNode
@@ -68,6 +82,7 @@ export default function SkillTree({
                     accentColor={unit.accentColor}
                     glowColor={unit.glowColor}
                     lessonNumber={lessonIndex + 1}
+                    nodeType="lesson"
                     reviewDue={isDue}
                     onPress={() => onLessonPress(lesson, unit.accentColor)}
                     onLockedPress={() =>
@@ -79,28 +94,48 @@ export default function SkillTree({
                     }
                   />
 
-                  {/* Spacer on right */}
                   <View style={[styles.nodeSpacer, position === 'left' && styles.nodeSpacerFull]} />
 
                   {/* Connector to next node */}
-                  {hasConnector && (
-                    <View
-                      style={[
-                        styles.verticalConnector,
-                        {
-                          backgroundColor:
-                            isUnitLocked || status === 'locked'
-                              ? Colors.nodeLocked
-                              : unit.accentColor,
-                        },
-                        position === 'left' && styles.connectorLeft,
-                        position === 'right' && styles.connectorRight,
-                      ]}
-                    />
-                  )}
+                  <View
+                    style={[
+                      styles.verticalConnector,
+                      {
+                        backgroundColor:
+                          isUnitLocked || status === 'locked'
+                            ? Colors.nodeLocked
+                            : unit.accentColor,
+                      },
+                      position === 'left' && styles.connectorLeft,
+                      position === 'right' && styles.connectorRight,
+                    ]}
+                  />
                 </View>
               );
             })}
+
+            {/* Unit Quiz node — always centered, after all lessons */}
+            <View style={[styles.nodeRow]}>
+              <View style={styles.nodeSpacer} />
+
+              <LessonNode
+                status={quizStatus}
+                accentColor={unit.accentColor}
+                glowColor={unit.glowColor}
+                lessonNumber={unit.lessons.length + 1}
+                nodeType="quiz"
+                onPress={() => onQuizPress(unit)}
+                onLockedPress={() =>
+                  Alert.alert(
+                    '🔒 Quiz Locked',
+                    'Complete all lessons in this unit to unlock the quiz.',
+                    [{ text: 'OK' }]
+                  )
+                }
+              />
+
+              <View style={styles.nodeSpacer} />
+            </View>
 
             {/* Connector between units */}
             {unitIndex < UNITS.length - 1 && <View style={styles.unitConnector} />}
@@ -128,6 +163,7 @@ const styles = StyleSheet.create({
     width: 3,
     height: 32,
     backgroundColor: Colors.cardBorder,
+    marginTop: Spacing.lg,
   },
   nodeRow: {
     flexDirection: 'row',

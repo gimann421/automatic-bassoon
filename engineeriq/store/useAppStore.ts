@@ -4,6 +4,14 @@ import { ALL_LESSONS } from '../data/curriculum';
 
 export type LessonStatus = 'locked' | 'available' | 'completed';
 
+export interface UnitQuizProgress {
+  passed: boolean;
+  score: number;
+  outOf: number;
+  xpAwarded: number;
+  lastAttemptDate: string;
+}
+
 export interface AppState {
   // User
   xp: number;
@@ -15,17 +23,23 @@ export interface AppState {
   // Progress
   lessonProgress: Record<string, LessonStatus>;
   lessonLastCompleted: Record<string, string>; // lessonId -> ISO date string
+  lessonContentRead: Record<string, boolean>;  // lessonId -> read flag
+  unitQuizProgress: Record<string, UnitQuizProgress>; // unitId -> quiz progress
 
   // Session
-  hearts: number; // 0–3, resets each lesson
+  hearts: number; // 0–3, used in unit quiz only
   weeklyXP: number; // resets each Sunday
   weeklyXPResetDate: string; // ISO date of last reset
 
   // Derived helpers
   getDueReviews: () => string[]; // lessonIds due for review
+  isUnitQuizUnlocked: (unitId: string) => boolean;
+  canRetakeQuizToday: (unitId: string) => boolean;
 
   // Actions
-  completeLesson: (lessonId: string, perfect: boolean) => void;
+  markContentRead: (lessonId: string) => void;
+  completePractice: (lessonId: string) => void;
+  completeUnitQuiz: (unitId: string, score: number, outOf: number) => void;
   loseHeart: () => void;
   resetHearts: () => void;
   checkAndUpdateStreak: () => void;
@@ -36,6 +50,7 @@ export interface AppState {
 
 const STORAGE_KEY = 'engineeriq_state';
 const REVIEW_INTERVAL_DAYS = 3;
+const PRACTICE_XP = 10;
 
 function todayString(): string {
   return new Date().toISOString().split('T')[0];
@@ -46,14 +61,19 @@ function daysBetween(a: string, b: string): number {
   return Math.floor((new Date(b).getTime() - new Date(a).getTime()) / msPerDay);
 }
 
-function isSunday(dateStr: string): boolean {
-  return new Date(dateStr).getDay() === 0;
-}
-
 function getSundayBefore(dateStr: string): string {
   const d = new Date(dateStr);
   d.setDate(d.getDate() - d.getDay());
   return d.toISOString().split('T')[0];
+}
+
+function quizXpForScore(score: number, outOf: number, isRetake: boolean): number {
+  const ratio = score / outOf;
+  if (isRetake) return ratio >= 0.5 ? 50 : 0;
+  if (ratio === 1 || (outOf === 10 && score >= 8)) return 100;
+  if (ratio >= 0.7) return 75;
+  if (ratio >= 0.5) return 50;
+  return 0;
 }
 
 /** Compute which lessons should be unlocked given current completion state */
@@ -61,11 +81,9 @@ function computeProgress(
   completed: Record<string, string>
 ): Record<string, LessonStatus> {
   const progress: Record<string, LessonStatus> = {};
-
-  // Import here to avoid circular module issues — we need the full lesson order
   const { UNITS } = require('../data/curriculum');
 
-  let prevUnitComplete = true; // First unit starts unlocked
+  let prevUnitComplete = true;
 
   for (const unit of UNITS) {
     let allPrevLessonsComplete = prevUnitComplete;
@@ -75,14 +93,12 @@ function computeProgress(
       const isCompleted = !!completed[lesson.id];
 
       if (i === 0) {
-        // First lesson of unit: available if previous unit complete
         progress[lesson.id] = isCompleted
           ? 'completed'
           : allPrevLessonsComplete
           ? 'available'
           : 'locked';
       } else {
-        // Subsequent lessons: available if previous lesson complete
         const prevLesson = unit.lessons[i - 1];
         const prevDone = !!completed[prevLesson.id];
         progress[lesson.id] = isCompleted
@@ -93,7 +109,6 @@ function computeProgress(
       }
     }
 
-    // A unit is "fully complete" if all its lessons are completed
     prevUnitComplete = unit.lessons.every((l: { id: string }) => !!completed[l.id]);
   }
 
@@ -108,6 +123,8 @@ const useAppStore = create<AppState>((set, get) => ({
   streakFreezeUsedThisWeek: false,
   lessonProgress: computeProgress({}),
   lessonLastCompleted: {},
+  lessonContentRead: {},
+  unitQuizProgress: {},
   hearts: 3,
   weeklyXP: 0,
   weeklyXPResetDate: getSundayBefore(todayString()),
@@ -122,15 +139,41 @@ const useAppStore = create<AppState>((set, get) => ({
     }).map((l) => l.id);
   },
 
-  completeLesson: (lessonId: string, perfect: boolean) => {
+  isUnitQuizUnlocked: (unitId: string) => {
+    const { lessonLastCompleted } = get();
+    const { UNITS } = require('../data/curriculum');
+    const unit = UNITS.find((u: { id: string }) => u.id === unitId);
+    if (!unit) return false;
+    return unit.lessons.every((l: { id: string }) => !!lessonLastCompleted[l.id]);
+  },
+
+  canRetakeQuizToday: (unitId: string) => {
+    const { unitQuizProgress } = get();
+    const progress = unitQuizProgress[unitId];
+    if (!progress?.passed) return false;
+    const today = todayString();
+    return daysBetween(progress.lastAttemptDate, today) >= 1;
+  },
+
+  markContentRead: (lessonId: string) => {
+    const state = get();
+    if (state.lessonContentRead[lessonId]) return; // already marked
+    set({
+      lessonContentRead: { ...state.lessonContentRead, [lessonId]: true },
+    });
+    get().saveToStorage();
+  },
+
+  completePractice: (lessonId: string) => {
     const state = get();
     const today = todayString();
-    const xpEarned = perfect ? 30 : 20;
 
     // Check if weekly XP needs reset
     const currentSunday = getSundayBefore(today);
     const weeklyXP =
-      currentSunday !== state.weeklyXPResetDate ? xpEarned : state.weeklyXP + xpEarned;
+      currentSunday !== state.weeklyXPResetDate
+        ? PRACTICE_XP
+        : state.weeklyXP + PRACTICE_XP;
     const weeklyXPResetDate =
       currentSunday !== state.weeklyXPResetDate ? currentSunday : state.weeklyXPResetDate;
 
@@ -138,16 +181,53 @@ const useAppStore = create<AppState>((set, get) => ({
       ...state.lessonLastCompleted,
       [lessonId]: today,
     };
-
     const newProgress = computeProgress(newLastCompleted);
 
     set({
-      xp: state.xp + xpEarned,
+      xp: state.xp + PRACTICE_XP,
       weeklyXP,
       weeklyXPResetDate,
       lessonLastCompleted: newLastCompleted,
       lessonProgress: newProgress,
       hearts: 3,
+    });
+
+    get().checkAndUpdateStreak();
+    get().saveToStorage();
+  },
+
+  completeUnitQuiz: (unitId: string, score: number, outOf: number) => {
+    const state = get();
+    const today = todayString();
+    const existing = state.unitQuizProgress[unitId];
+    const isRetake = existing?.passed === true;
+
+    const xpEarned = quizXpForScore(score, outOf, isRetake);
+    const passed = score / outOf >= 0.5;
+
+    if (!passed) {
+      // Failed — reset hearts, don't save progress
+      set({ hearts: 3 });
+      return;
+    }
+
+    const currentSunday = getSundayBefore(today);
+    const weeklyXP =
+      currentSunday !== state.weeklyXPResetDate
+        ? xpEarned
+        : state.weeklyXP + xpEarned;
+    const weeklyXPResetDate =
+      currentSunday !== state.weeklyXPResetDate ? currentSunday : state.weeklyXPResetDate;
+
+    set({
+      xp: state.xp + xpEarned,
+      weeklyXP,
+      weeklyXPResetDate,
+      hearts: 3,
+      unitQuizProgress: {
+        ...state.unitQuizProgress,
+        [unitId]: { passed: true, score, outOf, xpAwarded: xpEarned, lastAttemptDate: today },
+      },
     });
 
     get().checkAndUpdateStreak();
@@ -173,12 +253,10 @@ const useAppStore = create<AppState>((set, get) => ({
     }
     const diff = daysBetween(state.lastActiveDate, today);
     if (diff === 0) {
-      // Already counted today
       return;
     } else if (diff === 1) {
       set({ streak: state.streak + 1, lastActiveDate: today });
     } else if (diff === 2 && state.streakFreezeAvailable && !state.streakFreezeUsedThisWeek) {
-      // Streak freeze protects a single missed day
       set({
         streak: state.streak + 1,
         lastActiveDate: today,
@@ -186,7 +264,6 @@ const useAppStore = create<AppState>((set, get) => ({
         streakFreezeUsedThisWeek: true,
       });
     } else {
-      // Streak broken
       set({ streak: 1, lastActiveDate: today });
     }
     get().saveToStorage();
@@ -208,6 +285,8 @@ const useAppStore = create<AppState>((set, get) => ({
       streakFreezeAvailable: state.streakFreezeAvailable,
       streakFreezeUsedThisWeek: state.streakFreezeUsedThisWeek,
       lessonLastCompleted: state.lessonLastCompleted,
+      lessonContentRead: state.lessonContentRead,
+      unitQuizProgress: state.unitQuizProgress,
       weeklyXP: state.weeklyXP,
       weeklyXPResetDate: state.weeklyXPResetDate,
     };
@@ -224,15 +303,12 @@ const useAppStore = create<AppState>((set, get) => ({
       if (!raw) return;
       const saved = JSON.parse(raw);
 
-      // Reset weekly freeze if a new week has started
       const today = todayString();
       const currentSunday = getSundayBefore(today);
       const savedSunday = getSundayBefore(saved.weeklyXPResetDate || today);
       const streakFreezeUsedThisWeek =
         currentSunday === savedSunday ? (saved.streakFreezeUsedThisWeek ?? false) : false;
-      const streakFreezeAvailable = streakFreezeUsedThisWeek
-        ? false
-        : true;
+      const streakFreezeAvailable = streakFreezeUsedThisWeek ? false : true;
 
       const newLastCompleted = saved.lessonLastCompleted ?? {};
       const newProgress = computeProgress(newLastCompleted);
@@ -244,6 +320,8 @@ const useAppStore = create<AppState>((set, get) => ({
         streakFreezeAvailable,
         streakFreezeUsedThisWeek,
         lessonLastCompleted: newLastCompleted,
+        lessonContentRead: saved.lessonContentRead ?? {},
+        unitQuizProgress: saved.unitQuizProgress ?? {},
         lessonProgress: newProgress,
         weeklyXP: saved.weeklyXP ?? 0,
         weeklyXPResetDate: saved.weeklyXPResetDate ?? getSundayBefore(today),

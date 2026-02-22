@@ -1,5 +1,4 @@
 import { Stack } from 'expo-router';
-import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet } from 'react-native';
 import { Colors } from '../constants/theme';
@@ -16,7 +15,15 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
-          name="lesson/[id]"
+          name="lesson"
+          options={{
+            headerShown: false,
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="quiz"
           options={{
             headerShown: false,
             presentation: 'fullScreenModal',

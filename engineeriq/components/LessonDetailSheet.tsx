@@ -7,7 +7,6 @@ import {
   Modal,
   Animated,
   TouchableWithoutFeedback,
-  Pressable,
 } from 'react-native';
 import { Colors, FontSize, Spacing, Radius, Shadow } from '../constants/theme';
 import { Lesson } from '../data/curriculum';
@@ -19,7 +18,8 @@ interface LessonDetailSheetProps {
   accentColor: string;
   visible: boolean;
   onClose: () => void;
-  onStart: (lessonId: string) => void;
+  onStartContent: (lessonId: string) => void;
+  onRedoPractice: (lessonId: string) => void;
 }
 
 export default function LessonDetailSheet({
@@ -28,7 +28,8 @@ export default function LessonDetailSheet({
   accentColor,
   visible,
   onClose,
-  onStart,
+  onStartContent,
+  onRedoPractice,
 }: LessonDetailSheetProps) {
   const slideAnim = useRef(new Animated.Value(400)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
@@ -36,29 +37,13 @@ export default function LessonDetailSheet({
   useEffect(() => {
     if (visible) {
       Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 320,
-          useNativeDriver: true,
-        }),
-        Animated.timing(backdropAnim, {
-          toValue: 1,
-          duration: 320,
-          useNativeDriver: true,
-        }),
+        Animated.timing(slideAnim, { toValue: 0, duration: 320, useNativeDriver: true }),
+        Animated.timing(backdropAnim, { toValue: 1, duration: 320, useNativeDriver: true }),
       ]).start();
     } else {
       Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 400,
-          duration: 260,
-          useNativeDriver: true,
-        }),
-        Animated.timing(backdropAnim, {
-          toValue: 0,
-          duration: 260,
-          useNativeDriver: true,
-        }),
+        Animated.timing(slideAnim, { toValue: 400, duration: 260, useNativeDriver: true }),
+        Animated.timing(backdropAnim, { toValue: 0, duration: 260, useNativeDriver: true }),
       ]).start();
     }
   }, [visible]);
@@ -66,8 +51,6 @@ export default function LessonDetailSheet({
   if (!lesson) return null;
 
   const isCompleted = status === 'completed';
-  const ctaLabel = isCompleted ? 'Review' : 'Start Lesson';
-  const ctaBg = isCompleted ? Colors.nodeCompleted : accentColor;
 
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={onClose}>
@@ -75,14 +58,15 @@ export default function LessonDetailSheet({
         <Animated.View style={[styles.backdrop, { opacity: backdropAnim }]} />
       </TouchableWithoutFeedback>
 
-      <Animated.View
-        style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}
-      >
+      <Animated.View style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}>
         {/* Handle */}
         <View style={styles.handle} />
 
         {/* Status badge */}
-        <View style={[styles.statusBadge, { backgroundColor: isCompleted ? Colors.correctLight : 'rgba(59,130,246,0.15)' }]}>
+        <View style={[
+          styles.statusBadge,
+          { backgroundColor: isCompleted ? Colors.correctLight : 'rgba(59,130,246,0.15)' },
+        ]}>
           <Text style={[styles.statusText, { color: isCompleted ? Colors.correct : accentColor }]}>
             {isCompleted ? '✓ Completed' : '▶ Available'}
           </Text>
@@ -98,7 +82,7 @@ export default function LessonDetailSheet({
         <View style={styles.meta}>
           <View style={styles.metaItem}>
             <Text style={styles.metaIcon}>⭐</Text>
-            <Text style={styles.metaText}>{isCompleted ? lesson.xpReward : lesson.xpReward} XP</Text>
+            <Text style={styles.metaText}>10 XP practice</Text>
           </View>
           <View style={styles.metaDivider} />
           <View style={styles.metaItem}>
@@ -108,27 +92,48 @@ export default function LessonDetailSheet({
           <View style={styles.metaDivider} />
           <View style={styles.metaItem}>
             <Text style={styles.metaIcon}>📝</Text>
-            <Text style={styles.metaText}>{lesson.questions.length} questions</Text>
+            <Text style={styles.metaText}>{lesson.practiceProblems.length} practice</Text>
           </View>
         </View>
 
-        {/* Perfect bonus hint */}
-        {!isCompleted && (
-          <View style={styles.bonusHint}>
-            <Text style={styles.bonusText}>
-              💎 Get all answers right for 30 XP (bonus +10!)
-            </Text>
+        {/* CTAs */}
+        {isCompleted ? (
+          // Completed — show two options
+          <View style={styles.twoButtonRow}>
+            <TouchableOpacity
+              style={[styles.secondaryButton, { borderColor: accentColor }]}
+              onPress={() => onStartContent(lesson.id)}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.secondaryButtonText, { color: accentColor }]}>
+                📖 Review Lesson
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: accentColor }]}
+              onPress={() => onRedoPractice(lesson.id)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.primaryButtonText}>✏️ Redo Practice</Text>
+            </TouchableOpacity>
           </View>
+        ) : (
+          // Available — start lesson content
+          <>
+            <View style={styles.bonusHint}>
+              <Text style={styles.bonusText}>
+                📖 Read the lesson first, then practice to earn 10 XP
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.ctaButton, { backgroundColor: accentColor }]}
+              onPress={() => onStartContent(lesson.id)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.ctaText}>Start Lesson</Text>
+            </TouchableOpacity>
+          </>
         )}
-
-        {/* CTA Button */}
-        <TouchableOpacity
-          style={[styles.ctaButton, { backgroundColor: ctaBg }]}
-          onPress={() => onStart(lesson.id)}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.ctaText}>{ctaLabel}</Text>
-        </TouchableOpacity>
       </Animated.View>
     </Modal>
   );
@@ -200,7 +205,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.base,
   },
   metaText: {
-    fontSize: FontSize.sm,
+    fontSize: FontSize.xs,
     color: Colors.textSecondary,
     fontWeight: '600',
   },
@@ -210,14 +215,41 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cardBorder,
   },
   bonusHint: {
-    backgroundColor: 'rgba(245,158,11,0.1)',
+    backgroundColor: 'rgba(59,130,246,0.1)',
     borderRadius: Radius.md,
     padding: Spacing.md,
   },
   bonusText: {
     fontSize: FontSize.sm,
-    color: Colors.xpGold,
+    color: Colors.textSecondary,
     fontWeight: '600',
+  },
+  twoButtonRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  secondaryButton: {
+    flex: 1,
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.lg,
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+  secondaryButtonText: {
+    fontSize: FontSize.sm,
+    fontWeight: '800',
+  },
+  primaryButton: {
+    flex: 1,
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.lg,
+    alignItems: 'center',
+  },
+  primaryButtonText: {
+    color: Colors.white,
+    fontSize: FontSize.sm,
+    fontWeight: '800',
   },
   ctaButton: {
     borderRadius: Radius.lg,
