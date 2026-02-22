@@ -1,11 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  withSequence,
-  withTiming,
-  useSharedValue,
-} from 'react-native-reanimated';
+import React, { useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Colors, FontSize, Spacing, Radius, Shadow } from '../../constants/theme';
 import { MultipleChoiceQuestion } from '../../data/curriculum';
 
@@ -26,23 +20,21 @@ function OptionCard({
   onSelect,
   disabled,
 }: OptionCardProps) {
-  const shakeValue = useSharedValue(0);
+  const shakeAnim = useRef(new Animated.Value(0)).current;
 
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: shakeValue.value }],
-  }));
+  const animStyle = { transform: [{ translateX: shakeAnim }] };
 
   const handlePress = () => {
     if (disabled || selectedIndex !== null) return;
     const isCorrect = index === correctIndex;
     if (!isCorrect) {
-      shakeValue.value = withSequence(
-        withTiming(-8, { duration: 50 }),
-        withTiming(8, { duration: 50 }),
-        withTiming(-8, { duration: 50 }),
-        withTiming(8, { duration: 50 }),
-        withTiming(0, { duration: 50 })
-      );
+      Animated.sequence([
+        Animated.timing(shakeAnim, { toValue: -8, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 8, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: -8, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 8, duration: 50, useNativeDriver: true }),
+        Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+      ]).start();
     }
     onSelect(index);
   };
