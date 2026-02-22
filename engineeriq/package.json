@@ -16,7 +16,7 @@
     "expo-router": "^6.0.23",
     "expo-status-bar": "~3.0.9",
     "lottie-react-native": "^7.3.6",
-    "react": "19.1.0",
+    "react": "19.2.4",
     "react-native": "0.81.5",
     "react-native-gesture-handler": "^2.30.0",
     "react-native-reanimated": "~3.16.1",
@@ -25,7 +25,7 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
-    "@types/react": "~19.1.0",
+    "@types/react": "~19.2.0",
     "typescript": "~5.9.2"
   },
   "private": true
